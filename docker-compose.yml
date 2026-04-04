@@ -1,5 +1,24 @@
-version: "3"
+x-dns-settings: &dns-logic
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  dns:
+    - ${DOCKER_GATEWAY}
+
 services:
+  nginxproxymanager:
+    image: 'docker.io/jc21/nginx-proxy-manager:latest'
+    container_name: nginxproxymanager
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ${DATA_DIR}/NginxProxy/data:/data
+      - ${DATA_DIR}/NginxProxy/letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy-tier
+
   heimdall:
     image: lscr.io/linuxserver/heimdall:latest
     container_name: heimdall
@@ -8,11 +27,11 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${DOCKER_DATA_PATH}/heimdall:/config
-    ports:
-      - "80:80"
-      - "443:443"
+      - ${DATA_DIR}/heimdall:/config
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
@@ -26,15 +45,17 @@ services:
     devices:
       - /dev/dri
     volumes:
-      - ${DOCKER_DATA_PATH}/jellyfin:/config
-      - ${JELLYFIN_SHOWS_PATH}:/data/tvshows
-      - ${JELLYFIN_MOVIES_PATH}:/data/movies
-      - ${JELLYFIN_LIVE_PATH}:/data/live
+      - ${DATA_DIR}/jellyfin:/config
+      - ${BULK_DIR}/jellyfin/shows:/data/tvshows
+      - ${BULK_DIR}/jellyfin/movies:/data/movies
+      - ${BULK_DIR}/jellyfin/live:/data/live
     ports:
-      - "8096:8096"
       - "7359:7359/udp"
       - "1900:1900/udp"
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   pihole:
     container_name: pihole
@@ -42,14 +63,17 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "81:80/tcp"
     environment:
-      TZ: '${TZ}'
-      WEBPASSWORD: '${PIHOLE_WEBPASSWORD}'
+      - TZ=${TZ}
+      - WEBPASSWORD=${PIHOLE_WEBPASSWORD}
+      - DNSMASQ_LISTENING=all
+      - FTLCONF_LOCAL_IPV6=${PIHOLE_IPV6}
     volumes:
-      - '${DOCKER_DATA_PATH}/pihole/etc-pihole:/etc/pihole'
-      - '${DOCKER_DATA_PATH}/pihole/etc-dnsmasq.d:/etc/dnsmasq.d'
+      - '${DATA_DIR}/pihole/etc-pihole:/etc/pihole'
+      - '${DATA_DIR}/pihole/etc-dnsmasq.d:/etc/dnsmasq.d'
     restart: unless-stopped
+    networks:
+      - proxy-tier
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
@@ -60,13 +84,15 @@ services:
       - TZ=${TZ}
       - WEBUI_PORT=82
     volumes:
-      - ${DOCKER_DATA_PATH}/qbittorrent:/config
-      - ${TORRENTS_PATH}:/downloads
+      - ${DATA_DIR}/qbittorrent:/config
+      - ${BULK_DIR}:/HDD
     ports:
-      - "82:82"
       - "6881:6881"
       - "6881:6881/udp"
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   syncthing:
     image: lscr.io/linuxserver/syncthing:latest
@@ -77,14 +103,16 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${DOCKER_DATA_PATH}/syncthing:/config
-      - ${MEDIA_PATH}:/data
+      - ${DATA_DIR}/syncthing:/config
+      - ${MEDIA_DIR}:/data
     ports:
-      - "8384:8384"
       - "22000:22000/tcp"
       - "22000:22000/udp"
       - "21027:21027/udp"
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
@@ -94,12 +122,12 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${DOCKER_DATA_PATH}/sonarr:/config
-      - ${JELLYFIN_SHOWS_PATH}:/tv
-      - ${TORRENTS_PATH}:/downloads
-    ports:
-      - "8989:8989"
+      - ${DATA_DIR}/sonarr:/config
+      - ${BULK_DIR}:/HDD
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   radarr:
     image: lscr.io/linuxserver/radarr:latest
@@ -109,12 +137,12 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${DOCKER_DATA_PATH}/radarr:/config
-      - ${JELLYFIN_MOVIES_PATH}:/movies
-      - ${TORRENTS_PATH}:/downloads
-    ports:
-      - "7878:7878"
+      - ${DATA_DIR}/radarr:/config
+      - ${BULK_DIR}/:/HDD
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -124,10 +152,11 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${DOCKER_DATA_PATH}/prowlarr:/config
-    ports:
-      - "9696:9696"
+      - ${DATA_DIR}/prowlarr:/config
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   bazarr:
     image: lscr.io/linuxserver/bazarr:latest
@@ -137,54 +166,57 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${DOCKER_DATA_PATH}/bazarr:/config
-      - ${JELLYFIN_MOVIES_PATH}:/movies
-      - ${JELLYFIN_SHOWS_PATH}:/tv
-    ports:
-      - 6767:6767
+      - ${DATA_DIR}/bazarr:/config
+      - ${BULK_DIR}:/HDD
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
-    ports:
-      - "8191:8191"
     environment:
       - LOG_LEVEL=info
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   jdownloader-2:
     image: jlesage/jdownloader-2
     container_name: jdownloader
-    ports:
-      - "5800:5800"
     volumes:
-      - ${DOCKER_DATA_PATH}/jdownloader:/config:rw
-      - ${JDOWNLOADER_PATH}:/output:rw
+      - ${DATA_DIR}/jdownloader:/config:rw
+      - ${BULK_DIR}/jdownloader:/output:rw
+      - ${BULK_DIR}/jdownloader:/output:rw
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   jellyseerr:
     image: fallenbagel/jellyseerr:latest
     container_name: jellyseerr
     environment:
       - TZ=${TZ}
-    ports:
-      - 5055:5055
     volumes:
-      - ${DOCKER_DATA_PATH}/jellyseerr:/app/config
+      - ${DATA_DIR}/jellyseerr:/app/config
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   portainer:
     image: portainer/portainer-ee:latest
     container_name: portainer
     restart: always
-    ports:
-      - "8000:8000"
-      - "9444:9443"
-      - "9000:9000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${DOCKER_DATA_PATH}/portainer:/data
+      - ${DATA_DIR}/portainer:/data
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   watchtower:
     image: containrrr/watchtower
@@ -192,117 +224,147 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - DOCKER_API_VERSION=1.52
     command: >
       --cleanup
       --interval 3600
+    environment:
+      - DOCKER_API_VERSION=1.54
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   excalidraw:
     image: excalidraw/excalidraw:latest
     container_name: excalidraw
-    ports:
-      - "86:80"
     volumes:
-      - ${DOCKER_DATA_PATH}/excalidraw/:/data
+      - ${DATA_DIR}/excalidraw/:/data
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   stirlingpdf:
     container_name: stirlingpdf
     image: docker.stirlingpdf.com/stirlingtools/stirling-pdf:latest-fat
-    ports:
-      - '85:8080'
     volumes:
-      - ${DOCKER_DATA_PATH}/stirlingpdf/trainingData:/usr/share/tessdata
-      - ${DOCKER_DATA_PATH}/stirlingpdf/extraConfigs:/configs
-      - ${DOCKER_DATA_PATH}/stirlingpdf/customFiles:/customFiles/
-      - ${DOCKER_DATA_PATH}/stirlingpdf/logs:/logs/
-      - ${DOCKER_DATA_PATH}/stirlingpdf/pipeline:/pipeline/
+      - ${DATA_DIR}/stirlingpdf/trainingData:/usr/share/tessdata
+      - ${DATA_DIR}/stirlingpdf/extraConfigs:/configs
+      - ${DATA_DIR}/stirlingpdf/customFiles:/customFiles/
+      - ${DATA_DIR}/stirlingpdf/logs:/logs/
+      - ${DATA_DIR}/stirlingpdf/pipeline:/pipeline/
     environment:
       - DISABLE_ADDITIONAL_FEATURES=false
       - LANGS=en_US
     restart: unless-stopped
-
-  mealie:
-    image: ghcr.io/mealie-recipes/mealie:latest
-    container_name: mealie
-    ports:
-      - 9925:9000
-    volumes:
-      - ${DOCKER_DATA_PATH}/mealie:/app/data
-    environment:
-      - ALLOW_SIGNUP=true
-      - BASE_URL=http://localhost:9925
-    restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
   prunemate:
     image: anoniemerd/prunemate:latest
     container_name: prunemate
-    ports:
-      - "7676:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${DOCKER_DATA_PATH}/prunemate/logs:/var/log
-      - ${DOCKER_DATA_PATH}/prunemate/config:/config
+      - ${DATA_DIR}/prunemate/logs:/var/log
+      - ${DATA_DIR}/prunemate/config:/config
     environment:
-      - DOCKER_API_VERSION=1.52
       - PRUNEMATE_TZ=${TZ}
       - PRUNEMATE_TIME_24H=false
     restart: unless-stopped
+    <<: *dns-logic
+    networks:
+      - proxy-tier
 
-  syncwave:
-    image: syncwave/syncwave
-    container_name: syncwave
+  samba:
+    image: dperson/samba
+    container_name: samba
     restart: unless-stopped
     ports:
-      - '88:8080'
+      - "139:139"
+      - "445:445"
     volumes:
-      - ${DOCKER_DATA_PATH}/syncwave:/data
+      - ${MEDIA_DIR}:/mnt/media:z
+    command: >
+      -n
+      -s "Media;/mnt/media;yes;no;yes;all;all;all"
 
-  decluttarr:
-    image: ghcr.io/manimatter/decluttarr:latest
-    container_name: decluttarr
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: chuwi
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ${DATA_DIR}/tailscale:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_EXTRA_ARGS=--advertise-exit-node --advertise-routes=${TS_ROUTES} --accept-dns=false
+      - TS_STATE_DIR=/var/lib/tailscale
+
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:release
+    volumes:
+      - ${BULK_DIR}/immich:/data
+      - ${BULK_DIR}/immich:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DB_HOSTNAME=immich_postgres
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=${IMMICH_DB_PASSWORD}
+      - DB_DATABASE_NAME=immich
+      - REDIS_HOSTNAME=immich_redis
+      - IMMICH_MACHINE_LEARNING_ENABLED=false
+    depends_on:
+      - immich_redis
+      - immich_postgres
     restart: always
+    <<: *dns-logic
+    networks:
+      - proxy-tier
+
+  immich_redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:9
+    restart: always
+    <<: *dns-logic
+    networks:
+      - proxy-tier
+
+  immich_postgres:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
     environment:
-      TZ: ${TZ}
-      PUID: ${PUID}
-      PGID: ${PGID}
-      LOG_LEVEL: INFO
-      TIMER: 10
-
-      REMOVE_BAD_FILES: True
-      REMOVE_FAILED_DOWNLOADS: True
-      REMOVE_FAILED_IMPORTS: True
-      REMOVE_METADATA_MISSING: True
-      REMOVE_MISSING_FILES: True
-      REMOVE_ORPHANS: True
-      REMOVE_SLOW: False
-      REMOVE_STALLED: False
-      REMOVE_UNMONITORED: False
-      SEARCH_BETTER: True
-      SEARCH_MISSING: True
-
-      SONARR: >
-        - base_url: "http://192.168.0.2:8989"
-          api_key: "${SONARR_API_KEY}"
-
-      RADARR: >
-        - base_url: "http://192.168.0.2:7878"
-          api_key: "${RADARR_API_KEY}"
-
-      QBITTORRENT: >
-        - base_url: "http://192.168.0.2:82"
-          username: "${QBITTORRENT_USERNAME}"
-          password: "${QBITTORRENT_PASSWORD}"
-          name: "qBittorrent"
-
-  searx:
-    container_name: searx
+      - POSTGRES_PASSWORD=${IMMICH_DB_PASSWORD}
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=immich
+      - POSTGRES_INITDB_ARGS=--data-checksums
     volumes:
-      - '${DOCKER_DATA_PATH}/searx:/etc/searx'
-    ports:
-      - '8080:8080'
-    environment:
-      - 'BASE_URL=http://localhost:8080/'
-    image: searx/searx
+      - ${DATA_DIR}/immich/postgres:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: always
+    <<: *dns-logic
+    networks:
+      - proxy-tier
+
+  vaultwarden:
+    container_name: vaultwarden
+    image: vaultwarden/server:latest
     restart: unless-stopped
+    environment:
+      - SIGNUPS_ALLOWED=${VAULTWARDEN_SIGNUPS}
+      - DOMAIN=${VAULTWARDEN_DOMAIN}
+      - DATABASE_URL=data/vaultwarden.db
+    volumes:
+      - ${DATA_DIR}/vaultwarden:/data
+    <<: *dns-logic
+    networks:
+      - proxy-tier
+
+networks:
+  proxy-tier:
+    driver: bridge
